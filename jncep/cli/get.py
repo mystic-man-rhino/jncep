@@ -2,11 +2,11 @@ import logging
 
 import click
 
-from .. import core, jncalts, jncweb, namegen, spec, track, utils
+from .. import core, jncalts, utils
 from ..trio_utils import coro
 from . import options
 from .base import CatchAllExceptionsCommand
-from .epub import generate_epubs
+from .epub import create_epub_generation_options, generate_epubs_for_resource
 from .track import _add_track_series_logic
 
 logger = logging.getLogger(__name__)
@@ -57,11 +57,16 @@ async def get_series(
     config = jncalts.get_alt_config_for_origin(origin)
 
     async with core.JNCEPSession(config, credentials) as session:
-        series = await _add_track_series_logic(session, jnc_url, is_beginning=True, is_first_available_volume=False)
+        series, jnc_resource = await _add_track_series_logic(
+            session,
+            jnc_url,
+            is_beginning=False,
+            is_first_available_volume=False,
+        )
+        if not series:
+            return
 
-        # This is from epub generate
-        name_generator = namegen.NameGenerator(namegen_rules)
-        epub_generation_options = core.EpubGenerationOptions(
+        epub_generation_options = create_epub_generation_options(
             output_dirpath,
             is_subfolder,
             is_by_volume,
@@ -69,18 +74,9 @@ async def get_series(
             is_extract_content,
             is_not_replace_chars,
             style_css_path,
-            name_generator,
+            namegen_rules,
         )
 
-        jnc_resource = jncweb.resource_from_url(jnc_url)
-
-        if part_spec:
-            console.info(f"Use part specification '[highlight]{part_spec}[/]'")
-            part_spec_analyzed = spec.analyze_part_specs(part_spec)
-            part_spec_analyzed.normalize_and_verify(series)
-        else:
-            part_spec_analyzed = await core.to_part_spec(series, jnc_resource)
-
-        await generate_epubs(
-            session, series, part_spec_analyzed, epub_generation_options
+        await generate_epubs_for_resource(
+            session, series, jnc_resource, part_spec, epub_generation_options
         )

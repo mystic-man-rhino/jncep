@@ -2,11 +2,14 @@ import glob
 import os
 import shutil
 import time
+from types import SimpleNamespace
 
 from click.testing import CliRunner
 import pytest
 
+from jncep import track as track_module
 from jncep.cli import epub, get
+from jncep.cli.series import resolve_jnc_url_or_index
 from jncep.track import TrackConfigManager
 
 creds_not_available = not (
@@ -68,22 +71,37 @@ def test_simple_fetch_epub():
     assert os.path.exists(output_file)
     assert os.path.getsize(output_file) > 0
 
+
+def test_resolve_jnc_url_or_index_keeps_url():
+    url = "https://j-novel.club/series/the-faraway-paladin"
+
+    assert resolve_jnc_url_or_index(url) == url
+
+
+def test_resolve_jnc_url_or_index_uses_tracked_series():
+    tracked_series = {
+        "https://j-novel.club/series/one": SimpleNamespace(name="One"),
+        "https://j-novel.club/series/two": SimpleNamespace(name="Two"),
+    }
+
+    assert resolve_jnc_url_or_index("2", tracked_series) == (
+        "https://j-novel.club/series/two"
+    )
+    assert resolve_jnc_url_or_index("3", tracked_series) is None
+
+
 @pytest.mark.skipif(creds_not_available, reason="JNC test credentials not provided")
-def test_get_command():
+def test_get_command(monkeypatch, tmp_path):
     time.sleep(1)
     url = "https://j-novel.club/series/the-faraway-paladin"
     email = os.getenv("JCNEP_TEST_EMAIL")
     pwd = os.getenv("JCNEP_TEST_PASSWORD")
-    output_dirpath = "test_output"
+    output_dirpath = str(tmp_path / "output")
+    tracked_path = tmp_path / "tracked.json"
+    monkeypatch.setattr(track_module, "DEFAULT_CONFIG_FILEPATH", tracked_path)
 
     delete_all_files_in_directory(output_dirpath)
-
-    # Remove the series from tracking if it's already there
     track_manager = TrackConfigManager()
-    tracked_series = track_manager.read_tracked_series()
-    if url in tracked_series:
-        del tracked_series[url]
-        track_manager.write_tracked_series(tracked_series)
 
     runner = CliRunner()
     result = runner.invoke(
@@ -95,6 +113,8 @@ def test_get_command():
             pwd,
             "--output",
             output_dirpath,
+            "--namegen",
+            "default",
             url,
         ],
     )
